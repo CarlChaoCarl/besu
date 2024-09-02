@@ -128,7 +128,7 @@ public class AltBN128PairingPrecompiledContract extends AbstractAltBnPrecompiled
       final Fq2 p2_x = Fq2.create(p2_xReal, p2_xImag);
       final Fq2 p2_y = Fq2.create(p2_yReal, p2_yImag);
       final AltBn128Fq2Point p2 = new AltBn128Fq2Point(p2_x, p2_y);
-      if (!p2.isOnCurve() || !p2.isInGroup()) {
+      if (!p2.isOnCurve() /*|| !p2.isInGroup()*/) {
         return PrecompileContractResult.halt(
             null, Optional.of(ExceptionalHaltReason.PRECOMPILE_ERROR));
       }

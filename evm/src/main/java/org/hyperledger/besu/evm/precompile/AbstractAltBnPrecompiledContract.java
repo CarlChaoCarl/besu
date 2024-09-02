@@ -54,6 +54,7 @@ public abstract class AbstractAltBnPrecompiledContract extends AbstractPrecompil
       LOG.info("altbn128 native precompile not available: {}", ule.getMessage());
       useNative = false;
     }
+    useNative = false;
     return useNative;
   }
 

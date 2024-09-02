@@ -28,6 +28,43 @@ public class Fq implements FieldElement<Fq> {
 
   private static final BigInteger TWO = BigInteger.valueOf(2);
 
+  /** "p" field parameter of F_p, F_p2, F_p6 and F_p12 */
+  protected static final BigInteger P =
+      new BigInteger(
+          "21888242871839275222246405745257275088696311157297823662689037894645226208583");
+
+  @SuppressWarnings("unused")
+  private static final BigInteger REDUCER =
+      new BigInteger(
+          "115792089237316195423570985008687907853269984665640564039457584007913129639936");
+
+  /** The number of bits in the {@link #REDUCER} value. */
+  private static final int REDUCER_BITS = 256;
+
+  /** A precomputed value of {@link #REDUCER}^2 mod {@link #P}. */
+  private static final BigInteger REDUCER_SQUARED =
+      new BigInteger(
+          "3096616502983703923843567936837374451735540968419076528771170197431451843209");
+
+  /** A precomputed value of {@link #REDUCER}^3 mod {@link #P}. */
+  private static final BigInteger REDUCER_CUBED =
+      new BigInteger(
+          "14921786541159648185948152738563080959093619838510245177710943249661917737183");
+
+  /** A precomputed value of -{@link #P}^{-1} mod {@link #REDUCER}. */
+  private static final BigInteger FACTOR =
+      new BigInteger(
+          "111032442853175714102588374283752698368366046808579839647964533820976443843465");
+
+  /**
+   * The MASK value is set to 2^256 - 1 and is utilized to replace the operation % 2^256 with a
+   * bitwise AND using this value. This choice ensures that only the lower 256 bits of a result are
+   * retained, effectively simulating the modulus operation.
+   */
+  private static final BigInteger MASK =
+      new BigInteger(
+          "115792089237316195423570985008687907853269984665640564039457584007913129639935");
+
   /**
    * fq that represents 0.
    *
@@ -55,7 +92,7 @@ public class Fq implements FieldElement<Fq> {
    * @return the fq
    */
   public static Fq create(final BigInteger n) {
-    return new Fq(n);
+    return new Fq(toMontgomery(n));
   }
 
   /**
@@ -78,7 +115,7 @@ public class Fq implements FieldElement<Fq> {
    * @return the bytes
    */
   public Bytes toBytes() {
-    return Bytes.wrap(n.toByteArray()).trimLeadingZeros();
+    return Bytes.wrap((fromMontgomery(n)).toByteArray()).trimLeadingZeros();
   }
 
   @Override
@@ -88,19 +125,20 @@ public class Fq implements FieldElement<Fq> {
 
   @Override
   public boolean isValid() {
-    return n.compareTo(FIELD_MODULUS) < 0;
+    BigInteger ret = fromMontgomery(n);
+    return ret.compareTo(FIELD_MODULUS) < 0;
   }
 
   @Override
   public Fq add(final Fq other) {
-    final BigInteger result = n.add(other.n).mod(FIELD_MODULUS);
-    return new Fq(result);
+    BigInteger r = n.add(other.n);
+    return new Fq(r.compareTo(P) < 0 ? r : r.subtract(P));
   }
 
   @Override
   public Fq subtract(final Fq other) {
-    final BigInteger result = n.subtract(other.n).mod(FIELD_MODULUS);
-    return new Fq(result);
+    BigInteger r = n.subtract(other.n);
+    return new Fq(r.compareTo(BigInteger.ZERO) < 0 ? r.add(P) : r);
   }
 
   @Override
@@ -110,40 +148,40 @@ public class Fq implements FieldElement<Fq> {
 
   @Override
   public Fq multiply(final Fq other) {
-    final BigInteger result = n.multiply(other.n).mod(FIELD_MODULUS);
-    return new Fq(result);
+    return new Fq(redc(n.multiply(other.n)));
   }
 
   @Override
   public Fq divide(final Fq other) {
-    final BigInteger inverse = inverse(other.n, FIELD_MODULUS);
-    final BigInteger result = n.multiply(inverse).mod(FIELD_MODULUS);
-    return new Fq(result);
+    BigInteger r = redc(other.n.modInverse(P).multiply(REDUCER_CUBED));
+    return new Fq(redc(n.multiply(r)));
   }
 
-  private BigInteger inverse(final BigInteger a, final BigInteger n) {
-    if (a.compareTo(BigInteger.ZERO) == 0) {
-      return BigInteger.ZERO;
-    }
-    BigInteger lm = BigInteger.ONE;
-    BigInteger hm = BigInteger.ZERO;
-    BigInteger low = a.mod(n);
-    BigInteger high = n;
-    while (low.compareTo(BigInteger.ONE) > 0) {
-      final BigInteger r = high.divide(low);
-      final BigInteger nm = hm.subtract(lm.multiply(r));
-      final BigInteger neww = high.subtract(low.multiply(r));
-      high = low;
-      hm = lm;
-      low = neww;
-      lm = nm;
-    }
-    return lm.mod(n);
-  }
+  /*
+   private BigInteger inverse(final BigInteger a, final BigInteger n) {
+     if (a.compareTo(BigInteger.ZERO) == 0) {
+       return BigInteger.ZERO;
+     }
+     BigInteger lm = BigInteger.ONE;
+     BigInteger hm = BigInteger.ZERO;
+     BigInteger low = a.mod(n);
+     BigInteger high = n;
+     while (low.compareTo(BigInteger.ONE) > 0) {
+       final BigInteger r = high.divide(low);
+       final BigInteger nm = hm.subtract(lm.multiply(r));
+       final BigInteger neww = high.subtract(low.multiply(r));
+       high = low;
+       hm = lm;
+       low = neww;
+       lm = nm;
+     }
+     return lm.mod(n);
+   }
+  */
 
   @Override
   public Fq negate() {
-    return new Fq(n.negate());
+    return new Fq(n.negate().mod(P));
   }
 
   @Override
@@ -194,5 +232,19 @@ public class Fq implements FieldElement<Fq> {
 
     final Fq other = (Fq) obj;
     return n.compareTo(other.n) == 0;
+  }
+
+  private static BigInteger toMontgomery(final BigInteger n) {
+    return redc(n.multiply(REDUCER_SQUARED));
+  }
+
+  private static BigInteger fromMontgomery(final BigInteger n) {
+    return redc(n);
+  }
+
+  private static BigInteger redc(final BigInteger x) {
+    BigInteger temp = x.multiply(FACTOR).and(MASK);
+    BigInteger reduced = temp.multiply(P).add(x).shiftRight(REDUCER_BITS);
+    return reduced.compareTo(P) < 0 ? reduced : reduced.subtract(P);
   }
 }
